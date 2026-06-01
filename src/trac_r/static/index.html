@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JEPA Dynamic Experiment Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: monospace; background-color: #111; color: #eee; height: 100vh; display: flex; }
+        .sidebar { width: 300px; background: #222; border-right: 1px solid #444; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        .run-item { border: 1px solid #444; padding: 10px; margin-bottom: 10px; cursor: pointer; }
+        .run-item:hover { background: #333; }
+        .run-item.active { background: #444; border-color: #888; }
+        .main-content { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
+        
+        .chart-box { background: #222; border: 1px solid #444; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column;}
+        .chart-controls { display: flex; gap: 20px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #444; align-items: center; flex-wrap: wrap; font-size: 0.9em; }
+        
+        .chart-wrapper { width: 100%; display: flex; justify-content: center; }
+        .chart-container { position: relative; width: 100%; height: 400px; }
+        .chart-container.square-mode { width: 500px !important; height: 500px !important; }
+        
+        pre code { display: block; background: #000; padding: 15px; border-radius: 5px; overflow-x: auto; color: #a5d6ff; font-family: 'Courier New', Courier, monospace; }
+    </style>
+</head>
+<body>
+    <div class="sidebar" id="sidebar">
+        <h3 style="display: flex; justify-content: space-between; align-items: center;">
+            Experiment Runs
+            <span id="status-badge" style="font-size: 0.6em; padding: 3px 6px; border-radius: 4px; font-weight: normal;"></span>
+        </h3>
+        <div id="runs-list"></div>
+    </div>
+    
+    <div class="main-content">
+        <h2 id="run-title-display">Select a run</h2>
+        <div id="dynamic-charts-container"></div>
+        
+    </div>
+
+    <script>
+        let chartInstances = {};
+        let chartConfigs = {};
+
+        function calculateEMA(data, weight) {
+            if (weight <= 0) return data;
+            if (data.length === 0) return [];
+            let smoothed = [];
+            let current = null;
+            for (let i = 0; i < data.length; i++) {
+                if (data[i] === null || isNaN(data[i])) {
+                    smoothed.push(data[i]);
+                } else {
+                    if (current === null) current = data[i];
+                    else current = current * weight + data[i] * (1 - weight);
+                    smoothed.push(current);
+                }
+            }
+            return smoothed;
+        }
+
+        async function fetchRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const runs = await response.json();
+                const list = document.getElementById('runs-list');
+                list.innerHTML = '';
+                runs.forEach(run => {
+                    const div = document.createElement('div');
+                    div.className = 'run-item';
+                    const scriptText = run.source_script ? `<br><small style="color: #a855f7;">Script: ${run.source_script}</small>` : '';
+                    div.innerHTML = `<b>${run.run_name || 'Run'} #${run.run_number || '?'}</b><br><small>${run.timestamp}</small><br><small>Commit: ${run.git_commit}</small>${scriptText}`;
+                    div.onclick = () => {
+                        document.querySelectorAll('.run-item').forEach(el => el.classList.remove('active'));
+                        div.classList.add('active');
+                        loadRunData(run);
+                    };
+                    list.appendChild(div);
+                });
+                if(runs.length > 0) list.firstChild.click();
+            } catch (err) {
+                console.error("Failed to fetch runs:", err);
+            }
+        }
+
+        function createChartDOM(id, title, type, options) {
+            let controlsHtml = '';
+            
+            if (type === 'line' || type === 'scatter') {
+                controlsHtml += `<label style="cursor: pointer;"><input type="checkbox" id="log_${id}" onchange="updateChart('${id}')"> Log Y Scale</label>`;
+                controlsHtml += `<label style="display: flex; align-items: center; gap: 5px;">Smoothing (EMA): <input type="range" id="smooth_${id}" min="0" max="0.99" step="0.01" value="0.0" oninput="updateChart('${id}')"></label>`;
+            }
+            if (options.equal_aspect) {
+                controlsHtml += `<label style="cursor: pointer;"><input type="checkbox" id="equal_${id}" onchange="updateChart('${id}')" checked> Equal X/Y Scale</label>`;
+            }
+
+            return `
+                <div class="chart-box" id="box_${id}">
+                    <div class="chart-controls">
+                        <b style="color: #3b82f6;">${title}</b>
+                        ${controlsHtml}
+                    </div>
+                    <div class="chart-wrapper">
+                        <div class="chart-container ${options.equal_aspect ? 'square-mode' : ''}" id="container_${id}">
+                            <canvas id="canvas_${id}"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadRunData(run) {
+            let titleText = `${run.run_name} (Run #${run.run_number})`;
+            if (run.source_script) {
+                titleText += ` — Script: ${run.source_script}`;
+            }
+            document.getElementById('run-title-display').textContent = titleText;
+            const container = document.getElementById('dynamic-charts-container');
+            container.innerHTML = '';
+            
+            // Clean up old instances
+            Object.values(chartInstances).forEach(c => c.destroy());
+            chartInstances = {};
+            chartConfigs = {};
+
+            try {
+                // 1. Group line charts by filename
+                const filesToFetch = new Set();
+                const chartsByFile = {};
+                
+                if (run.charts && run.charts.length > 0) {
+                    run.charts.forEach(chart => {
+                        if (chart.type === 'line' || chart.type === 'line_multi') {
+                            filesToFetch.add(chart.filename);
+                            if (!chartsByFile[chart.filename]) chartsByFile[chart.filename] = [];
+                            chartsByFile[chart.filename].push(chart);
+                        }
+                    });
+                }
+                
+                // Always try metrics.csv just in case there are unclaimed metrics there
+                filesToFetch.add('metrics.csv');
+
+                for (const filename of filesToFetch) {
+                    const csvPath = `/${run.folder}/${filename}`;
+                    const response = await fetch(csvPath);
+                    if (!response.ok) continue;
+                    
+                    const text = await response.text();
+                    const rows = text.trim().split('\n');
+                    if (rows.length === 0 || rows[0] === "") continue;
+                    
+                    const headers = rows[0].split(',').map(h => h.trim());
+                    const epochIdx = headers.indexOf('epoch');
+                    const epochs = [];
+                    const metricData = {};
+                    const claimedColumns = new Set();
+                    const localChartIds = [];
+
+                    // Pre-register custom charts for this file
+                    const fileCharts = chartsByFile[filename] || [];
+                    fileCharts.forEach(chart => {
+                        if (chart.options && chart.options.y) {
+                            chart.options.y.forEach(col => claimedColumns.add(col));
+                            const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                            localChartIds.push(id);
+                            chartConfigs[id] = {
+                                type: 'line_multi',
+                                title: chart.title,
+                                epochs: epochs,
+                                y_columns: chart.options.y,
+                                datasetsData: {},
+                                options: chart.options || {}
+                            };
+                            container.innerHTML += createChartDOM(id, chart.title, 'line', chart.options || {});
+                        }
+                    });
+
+                    headers.forEach((h, idx) => {
+                        if (h !== 'epoch' && h !== 'step' && h !== 'time') {
+                            metricData[h] = { idx: idx, values: [] };
+                        }
+                    });
+
+                    for(let i=1; i<rows.length; i++) {
+                        const cols = rows[i].split(',');
+                        if (cols.length > 1) {
+                            epochs.push(epochIdx !== -1 ? parseFloat(cols[epochIdx]) : i);
+                            Object.keys(metricData).forEach(k => {
+                                metricData[k].values.push(parseFloat(cols[metricData[k].idx]));
+                            });
+                        }
+                    }
+
+                    // Inject data into line_multi custom charts for THIS file
+                    localChartIds.forEach(id => {
+                        chartConfigs[id].y_columns.forEach(col => {
+                            if (metricData[col]) {
+                                chartConfigs[id].datasetsData[col] = metricData[col].values;
+                            }
+                        });
+                    });
+
+                    // Auto-discover the remaining unclaimed columns in this file
+                    Object.keys(metricData).forEach(metricName => {
+                        if (!claimedColumns.has(metricName)) {
+                            const id = `metric_${filename.replace(/[^a-zA-Z0-9]/g, '_')}_${metricName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                            chartConfigs[id] = {
+                                type: 'line',
+                                title: `Metric: ${metricName} (${filename})`,
+                                epochs: epochs,
+                                values: metricData[metricName].values,
+                                options: {}
+                            };
+                            container.innerHTML += createChartDOM(id, `Metric: ${metricName} (${filename})`, 'line', {});
+                        }
+                    });
+                }
+
+                // 2. Load custom registered charts (scatter, heatmap) from meta.json
+                if (run.charts && run.charts.length > 0) {
+                    for (const chart of run.charts) {
+                        if (chart.type === 'line' || chart.type === 'line_multi') continue; // Handled above
+                        const cPath = `/${run.folder}/${chart.filename}`;
+                        const cRes = await fetch(cPath);
+                        if (cRes.ok) {
+                            const text = await cRes.text();
+                            const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                            chartConfigs[id] = {
+                                type: chart.type,
+                                title: chart.title,
+                                raw_csv: text,
+                                options: chart.options || {}
+                            };
+                            container.innerHTML += createChartDOM(id, chart.title, chart.type, chart.options || {});
+                        }
+                    }
+                }
+
+                // Initialize all charts
+                Object.keys(chartConfigs).forEach(id => updateChart(id));
+
+            } catch (err) {
+                console.error("Error loading metrics:", err);
+            }
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                if (!res.ok) return;
+                const status = await res.json();
+                const badge = document.getElementById('status-badge');
+                if (status.mode === 'cloud') {
+                    badge.textContent = `☁️ Cloud`;
+                    badge.title = status.repo;
+                    badge.style.background = '#0ea5e9';
+                    badge.style.color = '#fff';
+                } else {
+                    badge.textContent = '🏠 Local';
+                    badge.style.background = '#475569';
+                    badge.style.color = '#fff';
+                }
+            } catch(e) {
+                console.error("Status fetch failed", e);
+            }
+        }
+
+        fetchStatus();
+        fetchRuns();
+
+        function updateChart(id) {
+            const config = chartConfigs[id];
+            if (!config) return;
+
+            const ctx = document.getElementById(`canvas_${id}`).getContext('2d');
+            if (chartInstances[id]) chartInstances[id].destroy();
+
+            // Read Controls
+            const logEl = document.getElementById(`log_${id}`);
+            const isLog = logEl ? logEl.checked : false;
+            
+            const smoothEl = document.getElementById(`smooth_${id}`);
+            const smoothWeight = smoothEl ? parseFloat(smoothEl.value) : 0;
+            
+            const equalEl = document.getElementById(`equal_${id}`);
+            const isEqual = equalEl ? equalEl.checked : (config.options.equal_aspect || false);
+
+            if (isEqual) {
+                document.getElementById(`container_${id}`).classList.add('square-mode');
+            } else {
+                document.getElementById(`container_${id}`).classList.remove('square-mode');
+            }
+
+            if (config.type === 'line' || config.type === 'line_multi') {
+                const datasets = [];
+                const colors = ['#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f59e0b']; // Blue, Green, Red, Purple, Yellow
+                
+                if (config.type === 'line') {
+                    const rawPoints = config.epochs.map((e, i) => ({x: e, y: config.values[i]}));
+                    const smoothed = calculateEMA(config.values, smoothWeight);
+                    const smoothedPoints = config.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
+                    
+                    if (smoothWeight > 0) datasets.push({ label: 'Raw', data: rawPoints, borderColor: 'rgba(59, 130, 246, 0.2)', borderWidth: 1, pointRadius: 0, showLine: true });
+                    datasets.push({ label: 'Smoothed', data: smoothedPoints, borderColor: colors[0], borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
+                } else {
+                    let colorIdx = 0;
+                    config.y_columns.forEach(col => {
+                        const vals = config.datasetsData[col];
+                        if (vals) {
+                            const rawPoints = config.epochs.map((e, i) => ({x: e, y: vals[i]}));
+                            const smoothed = calculateEMA(vals, smoothWeight);
+                            const smoothedPoints = config.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
+                            
+                            const c = colors[colorIdx % colors.length];
+                            if (smoothWeight > 0) {
+                                // simple hack to make hex color transparent
+                                const c_raw = c + '40'; // 25% opacity hex
+                                datasets.push({ label: `${col} (Raw)`, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true });
+                            }
+                            datasets.push({ label: col, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
+                            colorIdx++;
+                        }
+                    });
+                }
+
+                chartInstances[id] = new Chart(ctx, {
+                    type: 'scatter', // use scatter so we can easily plot overlapping X coordinates
+                    data: { datasets: datasets },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false, color: '#eee',
+                        scales: {
+                            x: { type: 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                            y: { type: isLog ? 'logarithmic' : 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } }
+                        }
+                    }
+                });
+            } 
+            else if (config.type === 'scatter') {
+                const rows = config.raw_csv.trim().split('\n');
+                let trueData = [];
+                let predData = [];
+                for(let i=1; i<rows.length; i++) {
+                    const cols = rows[i].split(',');
+                    if(cols.length >= 5) {
+                        if(cols[1] !== "") trueData.push({x: parseFloat(cols[1]), y: parseFloat(cols[2])});
+                        if(cols[3] !== "") predData.push({x: parseFloat(cols[3]), y: parseFloat(cols[4])});
+                    }
+                }
+                
+                if (smoothWeight > 0) {
+                    const tx = calculateEMA(trueData.map(d=>d.x), smoothWeight);
+                    const ty = calculateEMA(trueData.map(d=>d.y), smoothWeight);
+                    trueData = tx.map((x, i) => ({x: x, y: ty[i]}));
+
+                    const px = calculateEMA(predData.map(d=>d.x), smoothWeight);
+                    const py = calculateEMA(predData.map(d=>d.y), smoothWeight);
+                    predData = px.map((x, i) => ({x: x, y: py[i]}));
+                }
+
+                let options = {
+                    responsive: true, maintainAspectRatio: isEqual, aspectRatio: 1, animation: false, color: '#eee',
+                    scales: {
+                        x: { type: 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                        y: { type: isLog ? 'logarithmic' : 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } }
+                    }
+                };
+
+                if (isEqual) {
+                    let allX = trueData.map(d=>d.x).concat(predData.map(d=>d.x)).filter(v => !isNaN(v));
+                    let allY = trueData.map(d=>d.y).concat(predData.map(d=>d.y)).filter(v => !isNaN(v));
+                    if(allX.length > 0 && allY.length > 0) {
+                        let globalMin = Math.min(...allX, ...allY);
+                        let globalMax = Math.max(...allX, ...allY);
+                        let padding = (globalMax - globalMin) * 0.1 || 1;
+                        options.scales.x.min = globalMin - padding;
+                        options.scales.x.max = globalMax + padding;
+                        options.scales.y.min = globalMin - padding;
+                        options.scales.y.max = globalMax + padding;
+                    }
+                }
+
+                chartInstances[id] = new Chart(ctx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [
+                            { label: 'True Path', data: trueData, borderColor: '#22c55e', showLine: true, borderDash: [5, 5], pointRadius: smoothWeight > 0 ? 0 : 3 },
+                            { label: 'Prediction', data: predData, borderColor: '#ef4444', showLine: true, pointRadius: smoothWeight > 0 ? 0 : 3 }
+                        ]
+                    },
+                    options: options
+                });
+            }
+            else if (config.type === 'heatmap') {
+                const rows = config.raw_csv.trim().split('\n');
+                const matrixData = [];
+                let maxCount = 0;
+                
+                const classLabels = config.options.classes || [];
+
+                for(let i=1; i<rows.length; i++) {
+                    const cols = rows[i].split(',');
+                    if (cols.length >= 3) {
+                        const true_idx = parseInt(cols[0]);
+                        const pred_idx = parseInt(cols[1]);
+                        const count = parseInt(cols[2]);
+                        if (count > maxCount) maxCount = count;
+                        
+                        matrixData.push({
+                            x: classLabels[pred_idx] || `Pred ${pred_idx}`,
+                            y: classLabels[true_idx] || `True ${true_idx}`,
+                            v: count
+                        });
+                    }
+                }
+
+                chartInstances[id] = new Chart(ctx, {
+                    type: 'matrix',
+                    data: {
+                        datasets: [{
+                            label: config.title,
+                            data: matrixData,
+                            backgroundColor(context) {
+                                const value = context.dataset.data[context.dataIndex].v;
+                                const alpha = maxCount > 0 ? value / maxCount : 0;
+                                return `rgba(59, 130, 246, ${alpha})`;
+                            },
+                            borderColor: '#111',
+                            borderWidth: 1,
+                            width: ({chart}) => {
+                                const area = chart.chartArea;
+                                if (!area) return 0;
+                                const numClasses = classLabels.length || 1;
+                                return area.width / numClasses - 1;
+                            },
+                            height: ({chart}) => {
+                                const area = chart.chartArea;
+                                if (!area) return 0;
+                                const numClasses = classLabels.length || 1;
+                                return area.height / numClasses - 1;
+                            }
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, color: '#eee',
+                        scales: {
+                            x: { title: { display: true, text: 'Predicted Class', color: '#eee' }, ticks: { color: '#aaa' }, grid: { display: false } },
+                            y: { title: { display: true, text: 'True Class', color: '#eee' }, ticks: { color: '#aaa' }, grid: { display: false } }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    title() { return ''; },
+                                    label(context) {
+                                        const v = context.dataset.data[context.dataIndex];
+                                        return ['True: ' + v.y, 'Pred: ' + v.x, 'Count: ' + v.v];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        fetchRuns();
+    </script>
+</body>
+</html>
