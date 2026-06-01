@@ -1,6 +1,8 @@
 # trac_r
 
-A cloud-native, lazy-loading ML experiment tracker backed by Hugging Face Datasets.
+A local-first, cloud-native, lazy-loading ML experiment tracker. It runs completely locally out-of-the-box with zero configuration, and can optionally stream or sync your runs to Hugging Face Datasets.
+
+![Dashboard Interface](interface.png)
 
 ## Installation
 ```bash

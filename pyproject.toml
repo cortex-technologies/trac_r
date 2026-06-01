@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trac-r"
 version = "0.1.0"
-description = "A cloud-native, lazy-loading ML experiment tracker backed by Hugging Face"
+description = "A local-first, cloud-native, lazy-loading ML experiment tracker"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,3 +20,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "trac_r" = ["static/*.html"]
+
+[tool.ty.environment]
+python = ".venv"
+python-version = "3.12"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.15",
+    "ty>=0.0.41",
+]
