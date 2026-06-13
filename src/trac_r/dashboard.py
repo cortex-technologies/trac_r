@@ -93,6 +93,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         elif parsed_path.path == "/":
             self.send_response(200)
             self.send_header("Content-type", "text/html")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.end_headers()
 
             static_dir = os.path.join(os.path.dirname(__file__), "static")

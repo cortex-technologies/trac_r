@@ -110,7 +110,10 @@
             `;
         }
 
+        let currentLoadId = 0;
+
         async function loadRunData(run) {
+            const loadId = ++currentLoadId;
             let titleText = `${run.run_name} (Run #${run.run_number})`;
             if (run.source_script) {
                 titleText += ` — Script: ${run.source_script}`;
@@ -143,11 +146,13 @@
                 filesToFetch.add('metrics.csv');
 
                 for (const filename of filesToFetch) {
+                    if (loadId !== currentLoadId) return;
                     const csvPath = `/${run.folder}/${filename}`;
                     const response = await fetch(csvPath);
                     if (!response.ok) continue;
                     
                     const text = await response.text();
+                    if (loadId !== currentLoadId) return;
                     const rows = text.trim().split('\n');
                     if (rows.length === 0 || rows[0] === "") continue;
                     
@@ -173,7 +178,7 @@
                                 datasetsData: {},
                                 options: chart.options || {}
                             };
-                            container.innerHTML += createChartDOM(id, chart.title, 'line', chart.options || {});
+                            container.insertAdjacentHTML('beforeend', createChartDOM(id, chart.title, 'line', chart.options || {}));
                         }
                     });
 
@@ -213,19 +218,20 @@
                                 values: metricData[metricName].values,
                                 options: {}
                             };
-                            container.innerHTML += createChartDOM(id, `Metric: ${metricName} (${filename})`, 'line', {});
+                            container.insertAdjacentHTML('beforeend', createChartDOM(id, `Metric: ${metricName} (${filename})`, 'line', {}));
                         }
                     });
                 }
 
-                // 2. Load custom registered charts (scatter, heatmap) from meta.json
                 if (run.charts && run.charts.length > 0) {
                     for (const chart of run.charts) {
+                        if (loadId !== currentLoadId) return;
                         if (chart.type === 'line' || chart.type === 'line_multi') continue; // Handled above
                         const cPath = `/${run.folder}/${chart.filename}`;
                         const cRes = await fetch(cPath);
                         if (cRes.ok) {
                             const text = await cRes.text();
+                            if (loadId !== currentLoadId) return;
                             const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
                             chartConfigs[id] = {
                                 type: chart.type,
@@ -233,11 +239,12 @@
                                 raw_csv: text,
                                 options: chart.options || {}
                             };
-                            container.innerHTML += createChartDOM(id, chart.title, chart.type, chart.options || {});
+                            container.insertAdjacentHTML('beforeend', createChartDOM(id, chart.title, chart.type, chart.options || {}));
                         }
                     }
                 }
 
+                if (loadId !== currentLoadId) return;
                 // Initialize all charts
                 Object.keys(chartConfigs).forEach(id => updateChart(id));
 
@@ -463,8 +470,6 @@
                 });
             }
         }
-
-        fetchRuns();
     </script>
 </body>
 </html>
