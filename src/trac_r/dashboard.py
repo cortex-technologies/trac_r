@@ -37,11 +37,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                         repo_id=REPO_ID, repo_type="dataset"
                     )
 
-                    # Find all unique run folders
+                    # Find all unique run folders and their files
                     run_folders = set()
+                    run_files = {}
                     for f in repo_files:
                         if "/" in f and f.startswith("run"):
-                            run_folders.add(f.split("/")[0])
+                            folder, filename = f.split("/", 1)
+                            run_folders.add(folder)
+                            run_files.setdefault(folder, []).append(filename)
 
                     for run_name in sorted(run_folders, reverse=True):
                         meta = {"run_name": run_name, "timestamp": "Unknown"}
@@ -58,6 +61,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                             except Exception:
                                 pass
                         meta["folder"] = run_name
+                        meta["files"] = run_files.get(run_name, [])
                         runs.append(meta)
                 except Exception as e:
                     print(f"Error fetching runs from HF: {e}")
@@ -75,6 +79,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                             else:
                                 meta = {"run_name": run_name, "timestamp": "Unknown"}
                             meta["folder"] = run_path
+                            try:
+                                meta["files"] = os.listdir(run_path)
+                            except Exception:
+                                meta["files"] = []
                             runs.append(meta)
 
             self.wfile.write(json.dumps(runs).encode("utf-8"))

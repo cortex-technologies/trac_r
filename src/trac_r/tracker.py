@@ -14,7 +14,8 @@ class ChartConfig(TypedDict):
     title: str
     filename: str
     type: str
-    options: dict[str, object]
+    series: NotRequired[list[dict[str, object]]]
+    layout: NotRequired[dict[str, object]]
 
 
 class ExperimentMeta(TypedDict):
@@ -103,15 +104,20 @@ class ExperimentTracker:
         title: str,
         filename: str,
         chart_type: str,
-        options: dict[str, object] | None = None,
+        series: list[dict[str, object]] | None = None,
+        layout: dict[str, object] | None = None,
     ):
         """Registers a custom chart so the UI engine automatically renders it."""
         chart_config: ChartConfig = {
             "title": title,
             "filename": filename,
             "type": chart_type,
-            "options": options or {},
         }
+        if series is not None:
+            chart_config["series"] = series
+        if layout is not None:
+            chart_config["layout"] = layout
+
         # Avoid duplicating entries
         for existing in self.meta["charts"]:
             if existing["title"] == title:
@@ -121,6 +127,36 @@ class ExperimentTracker:
 
         self.meta["charts"].append(chart_config)
         self._save_meta()
+
+    def log(
+        self,
+        metrics: dict[str, object],
+        step: int | float | None = None,
+        step_label: str = "step",
+        filename: str = "metrics.csv",
+    ):
+        """
+        Simplified logging API. Logs metrics and automatically registers line charts
+        for any newly seen metric keys.
+        """
+        data = dict(metrics)
+        if step is not None:
+            data[step_label] = step
+
+        self.log_metrics(filename, **data)
+
+        if not hasattr(self, "_auto_registered_metrics"):
+            self._auto_registered_metrics = set()
+
+        for key in metrics.keys():
+            if key not in self._auto_registered_metrics and key != step_label:
+                self.register_chart(
+                    title=f"{key}",
+                    filename=filename,
+                    chart_type="line",
+                    series=[{"name": key, "x": step_label, "y": key}],
+                )
+                self._auto_registered_metrics.add(key)
 
     def log_metrics(self, filename: str = "metrics.csv", **kwargs):
         """Logs metrics to a CSV file. Dynamically handles headers."""
@@ -209,7 +245,11 @@ class ExperimentTracker:
             title="2D Trajectory",
             filename=filename,
             chart_type="scatter",
-            options={"equal_aspect": True, "show_lines": True},
+            series=[
+                {"name": "True Path", "x": "true_dim0", "y": "true_dim1"},
+                {"name": "Prediction", "x": "pred_dim0", "y": "pred_dim1"},
+            ],
+            layout={"equal_aspect": True, "show_lines": True},
         )
         print(f"Saved trajectory data: {csv_path}")
 
@@ -244,6 +284,7 @@ class ExperimentTracker:
             title=title,
             filename=filename,
             chart_type="heatmap",
-            options={"classes": classes},
+            series=[{"x": "pred_class", "y": "true_class", "value": "count"}],
+            layout={"classes": classes},
         )
         print(f"Saved confusion matrix: {csv_path}")

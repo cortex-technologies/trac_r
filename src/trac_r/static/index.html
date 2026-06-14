@@ -9,7 +9,7 @@
     <style>
         body { margin: 0; padding: 0; font-family: monospace; background-color: #111; color: #eee; height: 100vh; display: flex; }
         .sidebar { width: 300px; background: #222; border-right: 1px solid #444; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
-        .run-item { border: 1px solid #444; padding: 10px; margin-bottom: 10px; cursor: pointer; }
+        .run-item { border: 1px solid #444; padding: 10px; margin-bottom: 10px; transition: background 0.2s; }
         .run-item:hover { background: #333; }
         .run-item.active { background: #444; border-color: #888; }
         .main-content { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
@@ -43,31 +43,49 @@
 </head>
 <body>
     <div class="sidebar" id="sidebar">
-        <h3 style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             Experiment Runs
             <span id="status-badge" style="font-size: 0.6em; padding: 3px 6px; border-radius: 4px; font-weight: normal;"></span>
         </h3>
+        <button id="clear-all-btn" style="margin-bottom: 15px; padding: 6px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer;">Clear All</button>
         <div id="runs-list"></div>
     </div>
     
     <div class="main-content">
         <div class="header-row">
-            <h2 id="run-title-display">Select a run</h2>
-            <div class="layout-control-container">
-                <label for="layout-select">Layout:</label>
-                <select id="layout-select" style="padding: 5px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;">
-                    <option value="auto">Auto (Smart)</option>
-                    <option value="1">1 Column</option>
-                    <option value="2">2 Columns</option>
-                    <option value="3">3 Columns</option>
-                </select>
+            <h2 id="run-title-display">Select runs to compare</h2>
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <div class="layout-control-container">
+                    <label for="non-line-select">Non-Line Charts:</label>
+                    <select id="non-line-select" style="padding: 5px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;">
+                        <option value="latest">Show Latest</option>
+                        <option value="all">Show All</option>
+                        <option value="none">Show None</option>
+                    </select>
+                </div>
+                <div class="layout-control-container">
+                    <label for="layout-select">Layout:</label>
+                    <select id="layout-select" style="padding: 5px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;">
+                        <option value="auto">Auto (Smart)</option>
+                        <option value="1">1 Column</option>
+                        <option value="2">2 Columns</option>
+                        <option value="3">3 Columns</option>
+                    </select>
+                </div>
             </div>
         </div>
+        <div id="run-warnings-container" style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid #f59e0b; color: #f59e0b; padding: 15px; border-radius: 5px; margin-bottom: 20px;"></div>
         <div id="dynamic-charts-container"></div>
         
     </div>
 
     <script>
+        const RUN_COLORS = [
+            '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f59e0b', 
+            '#ec4899', '#06b6d4', '#10b981', '#f97316', '#6366f1'
+        ];
+        let allRuns = [];
+        let selectedRuns = [];
         let chartInstances = {};
         let chartConfigs = {};
 
@@ -92,34 +110,67 @@
             try {
                 const response = await fetch('/api/runs');
                 const runs = await response.json();
+                allRuns = runs;
                 const list = document.getElementById('runs-list');
                 list.innerHTML = '';
-                runs.forEach(run => {
+                runs.forEach((run, index) => {
                     const div = document.createElement('div');
                     div.className = 'run-item';
                     const scriptText = run.source_script ? `<br><small style="color: #a855f7;">Script: ${run.source_script}</small>` : '';
-                    div.innerHTML = `<b>${run.run_name || 'Run'} #${run.run_number || '?'}</b><br><small>${run.timestamp}</small><br><small>Commit: ${run.git_commit}</small>${scriptText}`;
-                    div.onclick = () => {
-                        document.querySelectorAll('.run-item').forEach(el => el.classList.remove('active'));
-                        div.classList.add('active');
-                        loadRunData(run);
-                    };
+                    div.innerHTML = `
+                        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; width: 100%; margin: 0;">
+                            <input type="checkbox" class="run-checkbox" value="${index}" style="margin-top: 4px;">
+                            <div style="flex: 1;">
+                                <b>${run.run_name || 'Run'} #${run.run_number || '?'}</b><br><small>${run.timestamp}</small><br><small>Commit: ${run.git_commit}</small>${scriptText}
+                            </div>
+                        </label>
+                    `;
+                    const checkbox = div.querySelector('input');
+                    checkbox.addEventListener('change', () => {
+                        if (checkbox.checked) {
+                            div.classList.add('active');
+                            if (!selectedRuns.includes(run)) selectedRuns.push(run);
+                        } else {
+                            div.classList.remove('active');
+                            selectedRuns = selectedRuns.filter(r => r !== run);
+                        }
+                        selectedRuns.sort((a, b) => allRuns.indexOf(a) - allRuns.indexOf(b));
+                        loadMultipleRunsData();
+                    });
                     list.appendChild(div);
                 });
-                if(runs.length > 0) list.firstChild.click();
+                if(runs.length > 0) {
+                    const firstCb = list.querySelector('input');
+                    firstCb.checked = true;
+                    firstCb.dispatchEvent(new Event('change'));
+                }
             } catch (err) {
                 console.error("Failed to fetch runs:", err);
             }
         }
 
-        function createChartDOM(id, title, type, options) {
+        document.getElementById('clear-all-btn').addEventListener('click', () => {
+            document.querySelectorAll('.run-checkbox').forEach(cb => {
+                if (cb.checked) {
+                    cb.checked = false;
+                    cb.dispatchEvent(new Event('change'));
+                }
+            });
+        });
+
+        document.getElementById('non-line-select').addEventListener('change', () => {
+            loadMultipleRunsData();
+        });
+
+        function createChartDOM(id, title, type, layout) {
+            layout = layout || {};
             let controlsHtml = '';
             
-            if (type === 'line' || type === 'scatter') {
+            if (type === 'line' || type === 'line_multi' || type === 'scatter') {
                 controlsHtml += `<label style="cursor: pointer;"><input type="checkbox" id="log_${id}" onchange="updateChart('${id}')"> Log Y Scale</label>`;
-                controlsHtml += `<label style="display: flex; align-items: center; gap: 5px;">Smoothing (EMA): <input type="range" id="smooth_${id}" min="0" max="0.99" step="0.01" value="0.0" oninput="updateChart('${id}')"></label>`;
+                controlsHtml += `<label style="display: flex; align-items: center; gap: 5px;">Smoothing: <input type="range" id="smooth_${id}" min="0" max="0.99" step="0.01" value="0.0" oninput="updateChart('${id}')"></label>`;
             }
-            if (options.equal_aspect) {
+            if (layout.equal_aspect) {
                 controlsHtml += `<label style="cursor: pointer;"><input type="checkbox" id="equal_${id}" onchange="updateChart('${id}')" checked> Equal X/Y Scale</label>`;
             }
 
@@ -130,7 +181,7 @@
                         ${controlsHtml}
                     </div>
                     <div class="chart-wrapper">
-                        <div class="chart-container ${options.equal_aspect ? 'square-mode' : ''}" id="container_${id}">
+                        <div class="chart-container ${layout.equal_aspect ? 'square-mode' : ''}" id="container_${id}">
                             <canvas id="canvas_${id}"></canvas>
                         </div>
                     </div>
@@ -140,144 +191,176 @@
 
         let currentLoadId = 0;
 
-        async function loadRunData(run) {
+        async function loadMultipleRunsData() {
             const loadId = ++currentLoadId;
-            let titleText = `${run.run_name} (Run #${run.run_number})`;
-            if (run.source_script) {
-                titleText += ` — Script: ${run.source_script}`;
+            const container = document.getElementById('dynamic-charts-container');
+            const warningsContainer = document.getElementById('run-warnings-container');
+            
+            if (selectedRuns.length === 0) {
+                document.getElementById('run-title-display').textContent = 'No runs selected';
+                container.innerHTML = '';
+                if (warningsContainer) warningsContainer.style.display = 'none';
+                return;
+            }
+            
+            let titleText = `Comparing ${selectedRuns.length} run(s)`;
+            if (selectedRuns.length === 1) {
+                titleText = `${selectedRuns[0].run_name || 'Run'} (Run #${selectedRuns[0].run_number || '?'})`;
+                if (selectedRuns[0].source_script) titleText += ` — Script: ${selectedRuns[0].source_script}`;
             }
             document.getElementById('run-title-display').textContent = titleText;
-            const container = document.getElementById('dynamic-charts-container');
-            container.innerHTML = '';
             
-            // Clean up old instances
+            container.innerHTML = '';
+            if (warningsContainer) {
+                warningsContainer.style.display = 'none';
+                warningsContainer.innerHTML = '';
+            }
+            let warnings = [];
+            
             Object.values(chartInstances).forEach(c => c.destroy());
             chartInstances = {};
             chartConfigs = {};
 
             try {
-                // 1. Group line charts by filename
-                const filesToFetch = new Set();
-                const chartsByFile = {};
+                const nonLineMode = document.getElementById('non-line-select').value;
                 
-                if (run.charts && run.charts.length > 0) {
-                    run.charts.forEach(chart => {
-                        if (chart.type === 'line' || chart.type === 'line_multi') {
-                            filesToFetch.add(chart.filename);
-                            if (!chartsByFile[chart.filename]) chartsByFile[chart.filename] = [];
-                            chartsByFile[chart.filename].push(chart);
-                        }
-                    });
-                }
-                
-                // Always try metrics.csv just in case there are unclaimed metrics there
-                filesToFetch.add('metrics.csv');
-
-                for (const filename of filesToFetch) {
-                    if (loadId !== currentLoadId) return;
-                    const csvPath = `/${run.folder}/${filename}`;
-                    const response = await fetch(csvPath);
-                    if (!response.ok) continue;
+                const runPromises = selectedRuns.map(async (run) => {
+                    const runIdx = allRuns.indexOf(run);
+                    const runCharts = {};
+                    const filesToFetch = new Set();
+                    const chartsByFile = {};
                     
-                    const text = await response.text();
-                    if (loadId !== currentLoadId) return;
-                    const rows = text.trim().split('\n');
-                    if (rows.length === 0 || rows[0] === "") continue;
-                    
-                    const headers = rows[0].split(',').map(h => h.trim());
-                    const epochIdx = headers.indexOf('epoch');
-                    const epochs = [];
-                    const metricData = {};
-                    const claimedColumns = new Set();
-                    const localChartIds = [];
-
-                    // Pre-register custom charts for this file
-                    const fileCharts = chartsByFile[filename] || [];
-                    fileCharts.forEach(chart => {
-                        if (chart.options && chart.options.y) {
-                            chart.options.y.forEach(col => claimedColumns.add(col));
-                            const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                            localChartIds.push(id);
-                            chartConfigs[id] = {
-                                type: 'line_multi',
-                                title: chart.title,
-                                epochs: epochs,
-                                y_columns: chart.options.y,
-                                datasetsData: {},
-                                options: chart.options || {}
-                            };
-                            container.insertAdjacentHTML('beforeend', createChartDOM(id, chart.title, 'line', chart.options || {}));
-                        }
-                    });
-
-                    headers.forEach((h, idx) => {
-                        if (h !== 'epoch' && h !== 'step' && h !== 'time') {
-                            metricData[h] = { idx: idx, values: [] };
-                        }
-                    });
-
-                    for(let i=1; i<rows.length; i++) {
-                        const cols = rows[i].split(',');
-                        if (cols.length > 1) {
-                            epochs.push(epochIdx !== -1 ? parseFloat(cols[epochIdx]) : i);
-                            Object.keys(metricData).forEach(k => {
-                                metricData[k].values.push(parseFloat(cols[metricData[k].idx]));
-                            });
-                        }
-                    }
-
-                    // Inject data into line_multi custom charts for THIS file
-                    localChartIds.forEach(id => {
-                        chartConfigs[id].y_columns.forEach(col => {
-                            if (metricData[col]) {
-                                chartConfigs[id].datasetsData[col] = metricData[col].values;
+                    if (run.charts && run.charts.length > 0) {
+                        run.charts.forEach(chart => {
+                            if (chart.type === 'line' || chart.type === 'line_multi') {
+                                filesToFetch.add(chart.filename);
+                                if (!chartsByFile[chart.filename]) chartsByFile[chart.filename] = [];
+                                chartsByFile[chart.filename].push(chart);
                             }
                         });
-                    });
-
-                    // Auto-discover the remaining unclaimed columns in this file
-                    Object.keys(metricData).forEach(metricName => {
-                        if (!claimedColumns.has(metricName)) {
-                            const id = `metric_${filename.replace(/[^a-zA-Z0-9]/g, '_')}_${metricName.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                            chartConfigs[id] = {
-                                type: 'line',
-                                title: `Metric: ${metricName} (${filename})`,
-                                epochs: epochs,
-                                values: metricData[metricName].values,
-                                options: {}
-                            };
-                            container.insertAdjacentHTML('beforeend', createChartDOM(id, `Metric: ${metricName} (${filename})`, 'line', {}));
+                    }
+                    if (!run.files || run.files.includes('metrics.csv')) {
+                        filesToFetch.add('metrics.csv');
+                    }
+                    
+                    for (const filename of filesToFetch) {
+                        const response = await fetch(`/${run.folder}/${filename}`);
+                        if (!response.ok) continue;
+                        const text = await response.text();
+                        const rows = text.trim().split('\n');
+                        if (rows.length === 0 || rows[0] === "") continue;
+                        
+                        const headers = rows[0].split(',').map(h => h.trim());
+                        const epochIdx = headers.indexOf('epoch');
+                        const epochs = [];
+                        const metricData = {};
+                        const claimedColumns = new Set();
+                        
+                        const fileCharts = chartsByFile[filename] || [];
+                        fileCharts.forEach(chart => {
+                            if (chart.series) chart.series.forEach(s => claimedColumns.add(s.y));
+                        });
+                        
+                        headers.forEach((h, idx) => {
+                            if (h !== 'epoch' && h !== 'step') {
+                                metricData[h] = { idx: idx, values: [] };
+                            }
+                        });
+                        
+                        for(let i=1; i<rows.length; i++) {
+                            const cols = rows[i].split(',');
+                            if (cols.length > 1) {
+                                epochs.push(epochIdx !== -1 ? parseFloat(cols[epochIdx]) : i);
+                                Object.keys(metricData).forEach(k => {
+                                    metricData[k].values.push(parseFloat(cols[metricData[k].idx]));
+                                });
+                            }
                         }
-                    });
-                }
-
-                if (run.charts && run.charts.length > 0) {
-                    for (const chart of run.charts) {
-                        if (loadId !== currentLoadId) return;
-                        if (chart.type === 'line' || chart.type === 'line_multi') continue; // Handled above
-                        const cPath = `/${run.folder}/${chart.filename}`;
-                        const cRes = await fetch(cPath);
-                        if (cRes.ok) {
-                            const text = await cRes.text();
-                            if (loadId !== currentLoadId) return;
-                            const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                            chartConfigs[id] = {
-                                type: chart.type,
-                                title: chart.title,
-                                raw_csv: text,
-                                options: chart.options || {}
-                            };
-                            container.insertAdjacentHTML('beforeend', createChartDOM(id, chart.title, chart.type, chart.options || {}));
+                        
+                        fileCharts.forEach(chart => {
+                            if (chart.series && chart.series.length > 0) {
+                                const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                const dsData = {};
+                                chart.series.forEach(s => {
+                                    if (metricData[s.y]) dsData[s.y] = metricData[s.y].values;
+                                });
+                                runCharts[id] = { type: 'line_multi', title: chart.title, layout: chart.layout || {}, series: chart.series, epochs, datasetsData: dsData };
+                            }
+                        });
+                        
+                        Object.keys(metricData).forEach(metricName => {
+                            if (!claimedColumns.has(metricName)) {
+                                const id = `metric_${filename.replace(/[^a-zA-Z0-9]/g, '_')}_${metricName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                runCharts[id] = { type: 'line', title: `Metric: ${metricName} (${filename})`, epochs, values: metricData[metricName].values, layout: {} };
+                            }
+                        });
+                    }
+                    
+                    if (run.charts && run.charts.length > 0) {
+                        for (const chart of run.charts) {
+                            if (chart.type === 'line' || chart.type === 'line_multi') continue;
+                            const cRes = await fetch(`/${run.folder}/${chart.filename}`);
+                            if (cRes.ok) {
+                                const text = await cRes.text();
+                                let id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                runCharts[id] = { type: chart.type, title: chart.title, layout: chart.layout || {}, series: chart.series || [], raw_csv: text };
+                            }
                         }
                     }
+                    
+                    return { run, runIdx, runCharts };
+                });
+                
+                const results = await Promise.all(runPromises);
+                if (loadId !== currentLoadId) return;
+                
+                results.forEach(res => {
+                    const { run, runIdx, runCharts } = res;
+                    const runName = run.run_name || `Run #${run.run_number || runIdx}`;
+                    
+                    Object.keys(runCharts).forEach(id => {
+                        const chartData = runCharts[id];
+                        let targetId = id;
+                        
+                        if (chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter') {
+                            if (nonLineMode === 'none') return;
+                            if (nonLineMode === 'all') {
+                                targetId = `${id}_run${runIdx}`;
+                            }
+                        }
+                        
+                        if (!chartConfigs[targetId]) {
+                            chartConfigs[targetId] = {
+                                type: chartData.type,
+                                title: (nonLineMode === 'all' && chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter' && selectedRuns.length > 1) ? `${chartData.title} (${runName})` : chartData.title,
+                                layout: chartData.layout,
+                                series: chartData.series,
+                                dataByRun: []
+                            };
+                            container.insertAdjacentHTML('beforeend', createChartDOM(targetId, chartConfigs[targetId].title, chartData.type, chartData.layout));
+                        }
+                        
+                        if (nonLineMode === 'latest' && chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter') {
+                            if (chartConfigs[targetId].dataByRun.length === 0) {
+                                chartConfigs[targetId].dataByRun.push({ runName, runIdx, ...chartData });
+                            }
+                        } else {
+                            chartConfigs[targetId].dataByRun.push({ runName, runIdx, ...chartData });
+                        }
+                    });
+                });
+                
+                if (loadId !== currentLoadId) return;
+                
+                Object.keys(chartConfigs).forEach(id => updateChart(id));
+                
+                if (warnings.length > 0) {
+                    warningsContainer.style.display = 'block';
+                    warningsContainer.innerHTML = '<strong style="display: flex; align-items: center; gap: 8px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Configuration Warnings</strong><ul style="margin-top: 10px; margin-bottom: 0;">' + warnings.map(w => `<li style="margin-bottom: 5px;">${w}</li>`).join('') + '</ul>';
                 }
 
-                if (loadId !== currentLoadId) return;
-                // Initialize all charts
-                Object.keys(chartConfigs).forEach(id => updateChart(id));
-
             } catch (err) {
-                console.error("Error loading metrics:", err);
+                console.error("Error loading multiple runs data:", err);
             }
         }
 
@@ -312,7 +395,6 @@
             const ctx = document.getElementById(`canvas_${id}`).getContext('2d');
             if (chartInstances[id]) chartInstances[id].destroy();
 
-            // Read Controls
             const logEl = document.getElementById(`log_${id}`);
             const isLog = logEl ? logEl.checked : false;
             
@@ -320,7 +402,7 @@
             const smoothWeight = smoothEl ? parseFloat(smoothEl.value) : 0;
             
             const equalEl = document.getElementById(`equal_${id}`);
-            const isEqual = equalEl ? equalEl.checked : (config.options.equal_aspect || false);
+            const isEqual = equalEl ? equalEl.checked : (config.layout && config.layout.equal_aspect || false);
 
             if (isEqual) {
                 document.getElementById(`container_${id}`).classList.add('square-mode');
@@ -328,83 +410,111 @@
                 document.getElementById(`container_${id}`).classList.remove('square-mode');
             }
 
-            if (config.type === 'line' || config.type === 'line_multi') {
+            if (config.type === 'line' || config.type === 'line_multi' || config.type === 'scatter') {
                 const datasets = [];
-                const colors = ['#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f59e0b']; // Blue, Green, Red, Purple, Yellow
                 
-                if (config.type === 'line') {
-                    const rawPoints = config.epochs.map((e, i) => ({x: e, y: config.values[i]}));
-                    const smoothed = calculateEMA(config.values, smoothWeight);
-                    const smoothedPoints = config.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
+                config.dataByRun.forEach(runData => {
+                    const runName = runData.runName;
+                    const c = RUN_COLORS[runData.runIdx % RUN_COLORS.length];
+                    const c_raw = c + '40';
                     
-                    if (smoothWeight > 0) datasets.push({ label: 'Raw', data: rawPoints, borderColor: 'rgba(59, 130, 246, 0.2)', borderWidth: 1, pointRadius: 0, showLine: true });
-                    datasets.push({ label: 'Smoothed', data: smoothedPoints, borderColor: colors[0], borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
-                } else {
-                    let colorIdx = 0;
-                    config.y_columns.forEach(col => {
-                        const vals = config.datasetsData[col];
-                        if (vals) {
-                            const rawPoints = config.epochs.map((e, i) => ({x: e, y: vals[i]}));
-                            const smoothed = calculateEMA(vals, smoothWeight);
-                            const smoothedPoints = config.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
-                            
-                            const c = colors[colorIdx % colors.length];
-                            if (smoothWeight > 0) {
-                                // simple hack to make hex color transparent
-                                const c_raw = c + '40'; // 25% opacity hex
-                                datasets.push({ label: `${col} (Raw)`, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true });
+                    if (config.type === 'line') {
+                        const rawPoints = runData.epochs.map((e, i) => ({x: e, y: runData.values[i]}));
+                        const smoothed = calculateEMA(runData.values, smoothWeight);
+                        const smoothedPoints = runData.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
+                        
+                        let labelPrefix = config.dataByRun.length > 1 ? `${runName}` : 'Smoothed';
+                        let rawLabelPrefix = config.dataByRun.length > 1 ? `${runName} (Raw)` : 'Raw';
+                        
+                        if (smoothWeight > 0) datasets.push({ label: rawLabelPrefix, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true });
+                        datasets.push({ label: labelPrefix, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
+                    } 
+                    else if (config.type === 'line_multi') {
+                        let seriesIdx = 0;
+                        config.series.forEach(s => {
+                            const col = s.y;
+                            const seriesName = s.name || col;
+                            const vals = runData.datasetsData[col];
+                            if (vals) {
+                                const rawPoints = runData.epochs.map((e, i) => ({x: e, y: vals[i]}));
+                                const smoothed = calculateEMA(vals, smoothWeight);
+                                const smoothedPoints = runData.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
+                                
+                                const dash = seriesIdx > 0 ? [5, 5] : [];
+                                
+                                let labelPrefix = config.dataByRun.length > 1 ? `${seriesName} (${runName})` : seriesName;
+                                let rawLabelPrefix = config.dataByRun.length > 1 ? `${seriesName} (${runName} Raw)` : `${seriesName} (Raw)`;
+                                
+                                if (smoothWeight > 0) datasets.push({ label: rawLabelPrefix, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true, borderDash: dash });
+                                datasets.push({ label: labelPrefix, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true, borderDash: dash });
+                                
+                                seriesIdx++;
                             }
-                            datasets.push({ label: col, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
-                            colorIdx++;
-                        }
-                    });
-                }
-
-                chartInstances[id] = new Chart(ctx, {
-                    type: 'scatter', // use scatter so we can easily plot overlapping X coordinates
-                    data: { datasets: datasets },
-                    options: {
-                        responsive: true, maintainAspectRatio: false, animation: false, color: '#eee',
-                        scales: {
-                            x: { type: 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } },
-                            y: { type: isLog ? 'logarithmic' : 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } }
-                        }
+                        });
+                    }
+                    else if (config.type === 'scatter') {
+                        const rows = runData.raw_csv.trim().split('\n');
+                        const headers = rows[0].split(',').map(h => h.trim());
+                        
+                        config.series.forEach((s, sIdx) => {
+                            const xIdx = headers.indexOf(s.x);
+                            const yIdx = headers.indexOf(s.y);
+                            if (xIdx === -1 || yIdx === -1) return;
+                            
+                            let data = [];
+                            for(let i=1; i<rows.length; i++) {
+                                const cols = rows[i].split(',');
+                                if (cols.length > Math.max(xIdx, yIdx)) {
+                                    const xVal = parseFloat(cols[xIdx]);
+                                    const yVal = parseFloat(cols[yIdx]);
+                                    if (!isNaN(xVal) && !isNaN(yVal)) {
+                                        data.push({x: xVal, y: yVal});
+                                    }
+                                }
+                            }
+                            
+                            if (smoothWeight > 0) {
+                                const sx = calculateEMA(data.map(d=>d.x), smoothWeight);
+                                const sy = calculateEMA(data.map(d=>d.y), smoothWeight);
+                                data = sx.map((x, i) => ({x: x, y: sy[i]}));
+                            }
+                            
+                            let labelPrefix = config.dataByRun.length > 1 ? `${s.name || 'Series'} (${runName})` : (s.name || `Series ${sIdx+1}`);
+                            const dash = sIdx > 0 && config.layout && config.layout.show_lines ? [5, 5] : [];
+                            
+                            datasets.push({
+                                label: labelPrefix,
+                                data: data,
+                                borderColor: config.dataByRun.length > 1 ? c : RUN_COLORS[sIdx % RUN_COLORS.length],
+                                showLine: config.layout && config.layout.show_lines || false,
+                                pointRadius: smoothWeight > 0 ? 0 : 3,
+                                borderDash: dash
+                            });
+                        });
                     }
                 });
-            } 
-            else if (config.type === 'scatter') {
-                const rows = config.raw_csv.trim().split('\n');
-                let trueData = [];
-                let predData = [];
-                for(let i=1; i<rows.length; i++) {
-                    const cols = rows[i].split(',');
-                    if(cols.length >= 5) {
-                        if(cols[1] !== "") trueData.push({x: parseFloat(cols[1]), y: parseFloat(cols[2])});
-                        if(cols[3] !== "") predData.push({x: parseFloat(cols[3]), y: parseFloat(cols[4])});
-                    }
-                }
-                
-                if (smoothWeight > 0) {
-                    const tx = calculateEMA(trueData.map(d=>d.x), smoothWeight);
-                    const ty = calculateEMA(trueData.map(d=>d.y), smoothWeight);
-                    trueData = tx.map((x, i) => ({x: x, y: ty[i]}));
-
-                    const px = calculateEMA(predData.map(d=>d.x), smoothWeight);
-                    const py = calculateEMA(predData.map(d=>d.y), smoothWeight);
-                    predData = px.map((x, i) => ({x: x, y: py[i]}));
-                }
 
                 let options = {
-                    responsive: true, maintainAspectRatio: isEqual, aspectRatio: 1, animation: false, color: '#eee',
+                    responsive: true, maintainAspectRatio: !isEqual, aspectRatio: isEqual ? 1 : undefined, animation: false, color: '#eee',
                     scales: {
                         x: { type: 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } },
                         y: { type: isLog ? 'logarithmic' : 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } }
                     }
                 };
+                if (!isEqual) {
+                     options.maintainAspectRatio = false;
+                     delete options.aspectRatio;
+                }
 
-                if (isEqual) {
-                    let allX = trueData.map(d=>d.x).concat(predData.map(d=>d.x)).filter(v => !isNaN(v));
-                    let allY = trueData.map(d=>d.y).concat(predData.map(d=>d.y)).filter(v => !isNaN(v));
+                if (config.type === 'scatter' && isEqual) {
+                    let allX = [];
+                    let allY = [];
+                    datasets.forEach(ds => {
+                        allX = allX.concat(ds.data.map(d=>d.x));
+                        allY = allY.concat(ds.data.map(d=>d.y));
+                    });
+                    allX = allX.filter(v => !isNaN(v));
+                    allY = allY.filter(v => !isNaN(v));
                     if(allX.length > 0 && allY.length > 0) {
                         let globalMin = Math.min(...allX, ...allY);
                         let globalMax = Math.max(...allX, ...allY);
@@ -418,33 +528,41 @@
 
                 chartInstances[id] = new Chart(ctx, {
                     type: 'scatter',
-                    data: {
-                        datasets: [
-                            { label: 'True Path', data: trueData, borderColor: '#22c55e', showLine: true, borderDash: [5, 5], pointRadius: smoothWeight > 0 ? 0 : 3 },
-                            { label: 'Prediction', data: predData, borderColor: '#ef4444', showLine: true, pointRadius: smoothWeight > 0 ? 0 : 3 }
-                        ]
-                    },
+                    data: { datasets: datasets },
                     options: options
                 });
             }
             else if (config.type === 'heatmap') {
-                const rows = config.raw_csv.trim().split('\n');
+                const runData = config.dataByRun[0];
+                if (!runData) return;
+                
+                const rows = runData.raw_csv.trim().split('\n');
+                const headers = rows[0].split(',').map(h => h.trim());
+                
                 const matrixData = [];
                 let maxCount = 0;
                 
-                const classLabels = config.options.classes || [];
+                const classLabels = config.layout && config.layout.classes ? config.layout.classes : [];
+                
+                const s = config.series && config.series.length > 0 ? config.series[0] : null;
+                const xColIdx = s ? headers.indexOf(s.x) : 1;
+                const yColIdx = s ? headers.indexOf(s.y) : 0;
+                const vColIdx = s ? headers.indexOf(s.value) : 2;
 
                 for(let i=1; i<rows.length; i++) {
                     const cols = rows[i].split(',');
-                    if (cols.length >= 3) {
-                        const true_idx = parseInt(cols[0]);
-                        const pred_idx = parseInt(cols[1]);
-                        const count = parseInt(cols[2]);
+                    if (cols.length > Math.max(xColIdx, yColIdx, vColIdx)) {
+                        const x_idx = parseInt(cols[xColIdx]);
+                        const y_idx = parseInt(cols[yColIdx]);
+                        const count = parseInt(cols[vColIdx]);
+                        
+                        if (isNaN(x_idx) || isNaN(y_idx) || isNaN(count)) continue;
+                        
                         if (count > maxCount) maxCount = count;
                         
                         matrixData.push({
-                            x: classLabels[pred_idx] || `Pred ${pred_idx}`,
-                            y: classLabels[true_idx] || `True ${true_idx}`,
+                            x: classLabels[x_idx] || `Class ${x_idx}`,
+                            y: classLabels[y_idx] || `Class ${y_idx}`,
                             v: count
                         });
                     }
@@ -507,7 +625,6 @@
                 container.style.gridTemplateColumns = `repeat(${val}, 1fr)`;
             }
             
-            // Trigger chart resize to ensure they fit correctly in the new grid
             setTimeout(() => {
                 Object.values(chartInstances).forEach(chart => chart.resize());
             }, 100);
