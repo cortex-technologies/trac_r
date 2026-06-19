@@ -1,21 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TRAC_R</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@latest/dist/chartjs-chart-matrix.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; font-family: monospace; background-color: #111; color: #eee; height: 100vh; display: flex; }
-        .sidebar { width: 300px; background: #222; border-right: 1px solid #444; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
-        .run-item { border: 1px solid #444; padding: 10px; margin-bottom: 10px; transition: background 0.2s; }
-        .run-item:hover { background: #333; }
-        .run-item.active { background: #444; border-color: #888; }
-        .main-content { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
-        
-        .chart-box { background: #222; border: 1px solid #444; padding: 20px; display: flex; flex-direction: column; min-width: 0; }
-        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: monospace;
+            background-color: #111;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #222;
+            border-right: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .run-item {
+            border: 1px solid #444;
+            padding: 10px;
+            margin-bottom: 10px;
+            transition: background 0.2s;
+        }
+
+        .run-item:hover {
+            background: #333;
+        }
+
+        .run-item.active {
+            background: #444;
+            border-color: #888;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-box {
+            background: #222;
+            border: 1px solid #444;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
         #dynamic-charts-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
@@ -28,36 +73,81 @@
             align-items: center;
             margin-bottom: 20px;
         }
-        
+
         #run-title-display {
             margin: 0;
         }
-        .chart-controls { display: flex; gap: 20px; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #444; align-items: center; flex-wrap: wrap; font-size: 0.9em; }
-        
-        .chart-wrapper { width: 100%; display: flex; justify-content: center; }
-        .chart-container { position: relative; width: 100%; height: 400px; }
-        .chart-container.square-mode { width: 100% !important; height: auto !important; aspect-ratio: 1 / 1; max-width: 500px; max-height: 500px; }
-        
-        pre code { display: block; background: #000; padding: 15px; border-radius: 5px; overflow-x: auto; color: #a5d6ff; font-family: 'Courier New', Courier, monospace; }
+
+        .chart-controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #444;
+            align-items: center;
+            flex-wrap: wrap;
+            font-size: 0.9em;
+        }
+
+        .chart-wrapper {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+        }
+
+        .chart-container.square-mode {
+            width: 100% !important;
+            height: auto !important;
+            aspect-ratio: 1 / 1;
+            max-width: 500px;
+            max-height: 500px;
+        }
+
+        pre code {
+            display: block;
+            background: #000;
+            padding: 15px;
+            overflow-x: auto;
+            color: #a5d6ff;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        button,
+        select,
+        input,
+        #status-badge,
+        #run-warnings-container {
+            border-radius: 0 !important;
+        }
     </style>
 </head>
+
 <body>
     <div class="sidebar" id="sidebar">
         <h3 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             Experiment Runs
-            <span id="status-badge" style="font-size: 0.6em; padding: 3px 6px; border-radius: 4px; font-weight: normal;"></span>
+            <span id="status-badge" style="font-size: 0.6em; padding: 3px 6px; font-weight: normal;"></span>
         </h3>
-        <button id="clear-all-btn" style="margin-bottom: 15px; padding: 6px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer;">Clear All</button>
+        <button id="clear-all-btn"
+            style="margin-bottom: 15px; padding: 6px; background: #333; color: #eee; border: 1px solid #555; cursor: pointer;">Clear
+            All</button>
         <div id="runs-list"></div>
     </div>
-    
+
     <div class="main-content">
         <div class="header-row">
             <h2 id="run-title-display">Select runs to compare</h2>
             <div style="display: flex; gap: 15px; align-items: center;">
                 <div class="layout-control-container">
                     <label for="non-line-select">Non-Line Charts:</label>
-                    <select id="non-line-select" style="padding: 5px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;">
+                    <select id="non-line-select"
+                        style="padding: 5px; background: #333; color: #eee; border: 1px solid #555;">
                         <option value="latest">Show Latest</option>
                         <option value="all">Show All</option>
                         <option value="none">Show None</option>
@@ -65,7 +155,8 @@
                 </div>
                 <div class="layout-control-container">
                     <label for="layout-select">Layout:</label>
-                    <select id="layout-select" style="padding: 5px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;">
+                    <select id="layout-select"
+                        style="padding: 5px; background: #333; color: #eee; border: 1px solid #555;">
                         <option value="auto">Auto (Smart)</option>
                         <option value="1">1 Column</option>
                         <option value="2">2 Columns</option>
@@ -74,20 +165,58 @@
                 </div>
             </div>
         </div>
-        <div id="run-warnings-container" style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid #f59e0b; color: #f59e0b; padding: 15px; border-radius: 5px; margin-bottom: 20px;"></div>
+        <div id="run-warnings-container"
+            style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid #f59e0b; color: #f59e0b; padding: 15px; margin-bottom: 20px;">
+        </div>
         <div id="dynamic-charts-container"></div>
-        
+
     </div>
 
     <script>
         const RUN_COLORS = [
-            '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f59e0b', 
+            '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f59e0b',
             '#ec4899', '#06b6d4', '#10b981', '#f97316', '#6366f1'
         ];
+        const DASH_PATTERNS = [[], [5, 5], [2, 2], [8, 4], [12, 6]];
         let allRuns = [];
         let selectedRuns = [];
         let chartInstances = {};
         let chartConfigs = {};
+
+        function isOverlayable(type) {
+            return ['line', 'line_multi', 'scatter'].includes(type);
+        }
+
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            if (lines.length === 0 || lines[0] === '') return null;
+            const headers = lines[0].split(',').map(h => h.trim());
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',');
+                if (cols.length > 1) rows.push(cols);
+            }
+            return { headers, rows };
+        }
+
+        function computeEqualAspectRange(datasets, options) {
+            const allVals = [];
+            datasets.forEach(ds => ds.data.forEach(d => { allVals.push(d.x); allVals.push(d.y); }));
+            const valid = allVals.filter(v => !isNaN(v));
+            if (valid.length === 0) return;
+            const globalMin = Math.min(...valid);
+            const globalMax = Math.max(...valid);
+            const padding = (globalMax - globalMin) * 0.1 || 1;
+            options.scales.x.min = globalMin - padding;
+            options.scales.x.max = globalMax + padding;
+            options.scales.y.min = globalMin - padding;
+            options.scales.y.max = globalMax + padding;
+        }
+
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
 
         function calculateEMA(data, weight) {
             if (weight <= 0) return data;
@@ -116,12 +245,12 @@
                 runs.forEach((run, index) => {
                     const div = document.createElement('div');
                     div.className = 'run-item';
-                    const scriptText = run.source_script ? `<br><small style="color: #a855f7;">Script: ${run.source_script}</small>` : '';
+                    const scriptText = run.source_script ? `<br><small style="color: #a855f7;">Script: ${esc(run.source_script)}</small>` : '';
                     div.innerHTML = `
                         <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; width: 100%; margin: 0;">
                             <input type="checkbox" class="run-checkbox" value="${index}" style="margin-top: 4px;">
                             <div style="flex: 1;">
-                                <b>${run.run_name || 'Run'} #${run.run_number || '?'}</b><br><small>${run.timestamp}</small><br><small>Commit: ${run.git_commit}</small>${scriptText}
+                                <b>${esc(run.run_name) || 'Run'} #${esc(run.run_number) || '?'}</b><br><small>${esc(run.timestamp)}</small><br><small>Commit: ${esc(run.git_commit)}</small>${scriptText}
                             </div>
                         </label>
                     `;
@@ -139,7 +268,7 @@
                     });
                     list.appendChild(div);
                 });
-                if(runs.length > 0) {
+                if (runs.length > 0) {
                     const firstCb = list.querySelector('input');
                     firstCb.checked = true;
                     firstCb.dispatchEvent(new Event('change'));
@@ -165,8 +294,8 @@
         function createChartDOM(id, title, type, layout) {
             layout = layout || {};
             let controlsHtml = '';
-            
-            if (type === 'line' || type === 'line_multi' || type === 'scatter') {
+
+            if (type === 'line' || type === 'line_multi') {
                 controlsHtml += `<label style="cursor: pointer;"><input type="checkbox" id="log_${id}" onchange="updateChart('${id}')"> Log Y Scale</label>`;
                 controlsHtml += `<label style="display: flex; align-items: center; gap: 5px;">Smoothing: <input type="range" id="smooth_${id}" min="0" max="0.99" step="0.01" value="0.0" oninput="updateChart('${id}')"></label>`;
             }
@@ -195,41 +324,39 @@
             const loadId = ++currentLoadId;
             const container = document.getElementById('dynamic-charts-container');
             const warningsContainer = document.getElementById('run-warnings-container');
-            
+
             if (selectedRuns.length === 0) {
                 document.getElementById('run-title-display').textContent = 'No runs selected';
                 container.innerHTML = '';
                 if (warningsContainer) warningsContainer.style.display = 'none';
                 return;
             }
-            
+
             let titleText = `Comparing ${selectedRuns.length} run(s)`;
             if (selectedRuns.length === 1) {
                 titleText = `${selectedRuns[0].run_name || 'Run'} (Run #${selectedRuns[0].run_number || '?'})`;
                 if (selectedRuns[0].source_script) titleText += ` — Script: ${selectedRuns[0].source_script}`;
             }
             document.getElementById('run-title-display').textContent = titleText;
-            
+
             container.innerHTML = '';
             if (warningsContainer) {
                 warningsContainer.style.display = 'none';
                 warningsContainer.innerHTML = '';
             }
-            let warnings = [];
-            
             Object.values(chartInstances).forEach(c => c.destroy());
             chartInstances = {};
             chartConfigs = {};
 
             try {
                 const nonLineMode = document.getElementById('non-line-select').value;
-                
+
                 const runPromises = selectedRuns.map(async (run) => {
                     const runIdx = allRuns.indexOf(run);
                     const runCharts = {};
                     const filesToFetch = new Set();
                     const chartsByFile = {};
-                    
+
                     if (run.charts && run.charts.length > 0) {
                         run.charts.forEach(chart => {
                             if (chart.type === 'line' || chart.type === 'line_multi') {
@@ -242,41 +369,42 @@
                     if (!run.files || run.files.includes('metrics.csv')) {
                         filesToFetch.add('metrics.csv');
                     }
-                    
+
                     for (const filename of filesToFetch) {
                         const response = await fetch(`/${run.folder}/${filename}`);
                         if (!response.ok) continue;
                         const text = await response.text();
                         const rows = text.trim().split('\n');
                         if (rows.length === 0 || rows[0] === "") continue;
-                        
+
                         const headers = rows[0].split(',').map(h => h.trim());
                         const epochIdx = headers.indexOf('epoch');
+                        const stepIdx = headers.indexOf('step');
                         const epochs = [];
                         const metricData = {};
                         const claimedColumns = new Set();
-                        
+
                         const fileCharts = chartsByFile[filename] || [];
                         fileCharts.forEach(chart => {
                             if (chart.series) chart.series.forEach(s => claimedColumns.add(s.y));
                         });
-                        
+
                         headers.forEach((h, idx) => {
                             if (h !== 'epoch' && h !== 'step') {
                                 metricData[h] = { idx: idx, values: [] };
                             }
                         });
-                        
-                        for(let i=1; i<rows.length; i++) {
+
+                        for (let i = 1; i < rows.length; i++) {
                             const cols = rows[i].split(',');
                             if (cols.length > 1) {
-                                epochs.push(epochIdx !== -1 ? parseFloat(cols[epochIdx]) : i);
+                                epochs.push(epochIdx !== -1 ? parseFloat(cols[epochIdx]) : (stepIdx !== -1 ? parseFloat(cols[stepIdx]) : i));
                                 Object.keys(metricData).forEach(k => {
                                     metricData[k].values.push(parseFloat(cols[metricData[k].idx]));
                                 });
                             }
                         }
-                        
+
                         fileCharts.forEach(chart => {
                             if (chart.series && chart.series.length > 0) {
                                 const id = `custom_${chart.title.replace(/[^a-zA-Z0-9]/g, '_')}`;
@@ -287,7 +415,7 @@
                                 runCharts[id] = { type: 'line_multi', title: chart.title, layout: chart.layout || {}, series: chart.series, epochs, datasetsData: dsData };
                             }
                         });
-                        
+
                         Object.keys(metricData).forEach(metricName => {
                             if (!claimedColumns.has(metricName)) {
                                 const id = `metric_${filename.replace(/[^a-zA-Z0-9]/g, '_')}_${metricName.replace(/[^a-zA-Z0-9]/g, '_')}`;
@@ -295,7 +423,7 @@
                             }
                         });
                     }
-                    
+
                     if (run.charts && run.charts.length > 0) {
                         for (const chart of run.charts) {
                             if (chart.type === 'line' || chart.type === 'line_multi') continue;
@@ -307,57 +435,52 @@
                             }
                         }
                     }
-                    
+
                     return { run, runIdx, runCharts };
                 });
-                
+
                 const results = await Promise.all(runPromises);
                 if (loadId !== currentLoadId) return;
-                
+
                 results.forEach(res => {
                     const { run, runIdx, runCharts } = res;
                     const runName = run.run_name || `Run #${run.run_number || runIdx}`;
-                    
+
                     Object.keys(runCharts).forEach(id => {
                         const chartData = runCharts[id];
                         let targetId = id;
-                        
-                        if (chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter') {
+
+                        if (!isOverlayable(chartData.type)) {
                             if (nonLineMode === 'none') return;
                             if (nonLineMode === 'all') {
                                 targetId = `${id}_run${runIdx}`;
                             }
                         }
-                        
+
                         if (!chartConfigs[targetId]) {
                             chartConfigs[targetId] = {
                                 type: chartData.type,
-                                title: (nonLineMode === 'all' && chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter' && selectedRuns.length > 1) ? `${chartData.title} (${runName})` : chartData.title,
+                                title: (nonLineMode === 'all' && !isOverlayable(chartData.type) && selectedRuns.length > 1) ? `${chartData.title} (${runName})` : chartData.title,
                                 layout: chartData.layout,
                                 series: chartData.series,
                                 dataByRun: []
                             };
                             container.insertAdjacentHTML('beforeend', createChartDOM(targetId, chartConfigs[targetId].title, chartData.type, chartData.layout));
                         }
-                        
-                        if (nonLineMode === 'latest' && chartData.type !== 'line' && chartData.type !== 'line_multi' && chartData.type !== 'scatter') {
-                            if (chartConfigs[targetId].dataByRun.length === 0) {
-                                chartConfigs[targetId].dataByRun.push({ runName, runIdx, ...chartData });
+
+                        if (nonLineMode === 'latest' && !isOverlayable(chartData.type)) {
+                            if (chartConfigs[targetId].dataByRun.length === 0 || runIdx < chartConfigs[targetId].dataByRun[0].runIdx) {
+                                chartConfigs[targetId].dataByRun = [{ runName, runIdx, ...chartData }];
                             }
                         } else {
                             chartConfigs[targetId].dataByRun.push({ runName, runIdx, ...chartData });
                         }
                     });
                 });
-                
+
                 if (loadId !== currentLoadId) return;
-                
+
                 Object.keys(chartConfigs).forEach(id => updateChart(id));
-                
-                if (warnings.length > 0) {
-                    warningsContainer.style.display = 'block';
-                    warningsContainer.innerHTML = '<strong style="display: flex; align-items: center; gap: 8px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Configuration Warnings</strong><ul style="margin-top: 10px; margin-bottom: 0;">' + warnings.map(w => `<li style="margin-bottom: 5px;">${w}</li>`).join('') + '</ul>';
-                }
 
             } catch (err) {
                 console.error("Error loading multiple runs data:", err);
@@ -380,7 +503,7 @@
                     badge.style.background = '#475569';
                     badge.style.color = '#fff';
                 }
-            } catch(e) {
+            } catch (e) {
                 console.error("Status fetch failed", e);
             }
         }
@@ -397,10 +520,10 @@
 
             const logEl = document.getElementById(`log_${id}`);
             const isLog = logEl ? logEl.checked : false;
-            
+
             const smoothEl = document.getElementById(`smooth_${id}`);
             const smoothWeight = smoothEl ? parseFloat(smoothEl.value) : 0;
-            
+
             const equalEl = document.getElementById(`equal_${id}`);
             const isEqual = equalEl ? equalEl.checked : (config.layout && config.layout.equal_aspect || false);
 
@@ -412,83 +535,67 @@
 
             if (config.type === 'line' || config.type === 'line_multi' || config.type === 'scatter') {
                 const datasets = [];
-                
+
                 config.dataByRun.forEach(runData => {
                     const runName = runData.runName;
                     const c = RUN_COLORS[runData.runIdx % RUN_COLORS.length];
                     const c_raw = c + '40';
-                    
-                    if (config.type === 'line') {
-                        const rawPoints = runData.epochs.map((e, i) => ({x: e, y: runData.values[i]}));
-                        const smoothed = calculateEMA(runData.values, smoothWeight);
-                        const smoothedPoints = runData.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
-                        
-                        let labelPrefix = config.dataByRun.length > 1 ? `${runName}` : 'Smoothed';
-                        let rawLabelPrefix = config.dataByRun.length > 1 ? `${runName} (Raw)` : 'Raw';
-                        
-                        if (smoothWeight > 0) datasets.push({ label: rawLabelPrefix, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true });
-                        datasets.push({ label: labelPrefix, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true });
-                    } 
-                    else if (config.type === 'line_multi') {
+
+                    if (config.type === 'line' || config.type === 'line_multi') {
+                        // Normalize 'line' into a single-series 'line_multi' shape
+                        const seriesList = config.type === 'line'
+                            ? [{ name: config.dataByRun.length > 1 ? runName : 'Value', y: '__value__' }]
+                            : config.series;
+                        const getData = (col) => col === '__value__' ? runData.values : (runData.datasetsData && runData.datasetsData[col]);
+
                         let seriesIdx = 0;
-                        config.series.forEach(s => {
-                            const col = s.y;
-                            const seriesName = s.name || col;
-                            const vals = runData.datasetsData[col];
-                            if (vals) {
-                                const rawPoints = runData.epochs.map((e, i) => ({x: e, y: vals[i]}));
-                                const smoothed = calculateEMA(vals, smoothWeight);
-                                const smoothedPoints = runData.epochs.map((e, i) => ({x: e, y: smoothed[i]}));
-                                
-                                const dash = seriesIdx > 0 ? [5, 5] : [];
-                                
-                                let labelPrefix = config.dataByRun.length > 1 ? `${seriesName} (${runName})` : seriesName;
-                                let rawLabelPrefix = config.dataByRun.length > 1 ? `${seriesName} (${runName} Raw)` : `${seriesName} (Raw)`;
-                                
-                                if (smoothWeight > 0) datasets.push({ label: rawLabelPrefix, data: rawPoints, borderColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true, borderDash: dash });
-                                datasets.push({ label: labelPrefix, data: smoothedPoints, borderColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 2, showLine: true, borderDash: dash });
-                                
-                                seriesIdx++;
-                            }
+                        seriesList.forEach(s => {
+                            const seriesName = s.name || s.y;
+                            const vals = getData(s.y);
+                            if (!vals) return;
+
+                            const rawPoints = runData.epochs.map((e, i) => ({ x: e, y: vals[i] }));
+                            const smoothed = calculateEMA(vals, smoothWeight);
+                            const smoothedPoints = runData.epochs.map((e, i) => ({ x: e, y: smoothed[i] }));
+                            const dash = DASH_PATTERNS[seriesIdx % DASH_PATTERNS.length];
+
+                            let label = config.dataByRun.length > 1 && config.type === 'line_multi' ? `${seriesName} (${runName})` : seriesName;
+                            let rawLabel = config.dataByRun.length > 1 ? `${seriesName} (${config.type === 'line_multi' ? runName + ' ' : ''}Raw)` : `${seriesName === 'Value' ? '' : seriesName + ' '}Raw`;
+                            // For single-series line with single run, use cleaner labels
+                            if (config.type === 'line' && config.dataByRun.length === 1) { label = 'Smoothed'; rawLabel = 'Raw'; }
+
+                            if (smoothWeight > 0) datasets.push({ label: rawLabel, data: rawPoints, borderColor: c_raw, backgroundColor: c_raw, borderWidth: 1, pointRadius: 0, showLine: true, borderDash: dash });
+                            datasets.push({ label: label, data: smoothedPoints, borderColor: c, backgroundColor: c, borderWidth: 2, pointRadius: smoothWeight > 0 ? 0 : 1.5, showLine: true, borderDash: dash });
+                            seriesIdx++;
                         });
                     }
                     else if (config.type === 'scatter') {
-                        const rows = runData.raw_csv.trim().split('\n');
-                        const headers = rows[0].split(',').map(h => h.trim());
-                        
+                        const csv = parseCSV(runData.raw_csv);
+                        if (!csv) return;
+
                         config.series.forEach((s, sIdx) => {
-                            const xIdx = headers.indexOf(s.x);
-                            const yIdx = headers.indexOf(s.y);
+                            const xIdx = csv.headers.indexOf(s.x);
+                            const yIdx = csv.headers.indexOf(s.y);
                             if (xIdx === -1 || yIdx === -1) return;
-                            
-                            let data = [];
-                            for(let i=1; i<rows.length; i++) {
-                                const cols = rows[i].split(',');
+
+                            const data = [];
+                            csv.rows.forEach(cols => {
                                 if (cols.length > Math.max(xIdx, yIdx)) {
                                     const xVal = parseFloat(cols[xIdx]);
                                     const yVal = parseFloat(cols[yIdx]);
-                                    if (!isNaN(xVal) && !isNaN(yVal)) {
-                                        data.push({x: xVal, y: yVal});
-                                    }
+                                    if (!isNaN(xVal) && !isNaN(yVal)) data.push({ x: xVal, y: yVal });
                                 }
-                            }
-                            
-                            if (smoothWeight > 0) {
-                                const sx = calculateEMA(data.map(d=>d.x), smoothWeight);
-                                const sy = calculateEMA(data.map(d=>d.y), smoothWeight);
-                                data = sx.map((x, i) => ({x: x, y: sy[i]}));
-                            }
-                            
-                            let labelPrefix = config.dataByRun.length > 1 ? `${s.name || 'Series'} (${runName})` : (s.name || `Series ${sIdx+1}`);
-                            const dash = sIdx > 0 && config.layout && config.layout.show_lines ? [5, 5] : [];
-                            
+                            });
+
+                            const labelPrefix = config.dataByRun.length > 1 ? `${s.name || 'Series'} (${runName})` : (s.name || `Series ${sIdx + 1}`);
+                            const showLines = config.layout && config.layout.show_lines;
+                            const dash = showLines ? DASH_PATTERNS[sIdx % DASH_PATTERNS.length] : [];
+                            const seriesColor = config.dataByRun.length > 1 ? c : RUN_COLORS[sIdx % RUN_COLORS.length];
+
                             datasets.push({
-                                label: labelPrefix,
-                                data: data,
-                                borderColor: config.dataByRun.length > 1 ? c : RUN_COLORS[sIdx % RUN_COLORS.length],
-                                showLine: config.layout && config.layout.show_lines || false,
-                                pointRadius: smoothWeight > 0 ? 0 : 3,
-                                borderDash: dash
+                                label: labelPrefix, data, borderColor: seriesColor, backgroundColor: seriesColor,
+                                showLine: !!showLines, borderWidth: showLines ? 1.5 : undefined,
+                                pointRadius: 2.5, borderDash: dash
                             });
                         });
                     }
@@ -499,35 +606,45 @@
                     scales: {
                         x: { type: 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } },
                         y: { type: isLog ? 'logarithmic' : 'linear', ticks: { color: '#aaa' }, grid: { color: '#333' } }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                usePointStyle: true,
+                                color: '#eee',
+                                padding: 15,
+                                font: { size: 12 },
+                                generateLabels(chart) {
+                                    return chart.data.datasets.map((ds, i) => {
+                                        const meta = chart.getDatasetMeta(i);
+                                        return {
+                                            text: ds.label,
+                                            fontColor: '#eee',
+                                            fillStyle: ds.borderColor,
+                                            strokeStyle: ds.borderColor,
+                                            lineWidth: ds.showLine ? (ds.borderWidth || 2) : 0,
+                                            lineDash: ds.borderDash || [],
+                                            pointStyle: ds.showLine ? 'line' : 'circle',
+                                            hidden: meta.hidden,
+                                            datasetIndex: i
+                                        };
+                                    });
+                                }
+                            }
+                        }
                     }
                 };
                 if (!isEqual) {
-                     options.maintainAspectRatio = false;
-                     delete options.aspectRatio;
+                    options.maintainAspectRatio = false;
+                    delete options.aspectRatio;
                 }
 
                 if (config.type === 'scatter' && isEqual) {
-                    let allX = [];
-                    let allY = [];
-                    datasets.forEach(ds => {
-                        allX = allX.concat(ds.data.map(d=>d.x));
-                        allY = allY.concat(ds.data.map(d=>d.y));
-                    });
-                    allX = allX.filter(v => !isNaN(v));
-                    allY = allY.filter(v => !isNaN(v));
-                    if(allX.length > 0 && allY.length > 0) {
-                        let globalMin = Math.min(...allX, ...allY);
-                        let globalMax = Math.max(...allX, ...allY);
-                        let padding = (globalMax - globalMin) * 0.1 || 1;
-                        options.scales.x.min = globalMin - padding;
-                        options.scales.x.max = globalMax + padding;
-                        options.scales.y.min = globalMin - padding;
-                        options.scales.y.max = globalMax + padding;
-                    }
+                    computeEqualAspectRange(datasets, options);
                 }
 
                 chartInstances[id] = new Chart(ctx, {
-                    type: 'scatter',
+                    type: 'line',
                     data: { datasets: datasets },
                     options: options
                 });
@@ -535,38 +652,43 @@
             else if (config.type === 'heatmap') {
                 const runData = config.dataByRun[0];
                 if (!runData) return;
-                
-                const rows = runData.raw_csv.trim().split('\n');
-                const headers = rows[0].split(',').map(h => h.trim());
-                
+
+                const csv = parseCSV(runData.raw_csv);
+                if (!csv) return;
+                const headers = csv.headers;
+
                 const matrixData = [];
                 let maxCount = 0;
-                
+                let maxIdx = 0;
+
                 const classLabels = config.layout && config.layout.classes ? config.layout.classes : [];
-                
+
                 const s = config.series && config.series.length > 0 ? config.series[0] : null;
                 const xColIdx = s ? headers.indexOf(s.x) : 1;
                 const yColIdx = s ? headers.indexOf(s.y) : 0;
                 const vColIdx = s ? headers.indexOf(s.value) : 2;
 
-                for(let i=1; i<rows.length; i++) {
-                    const cols = rows[i].split(',');
+                csv.rows.forEach(cols => {
                     if (cols.length > Math.max(xColIdx, yColIdx, vColIdx)) {
                         const x_idx = parseInt(cols[xColIdx]);
                         const y_idx = parseInt(cols[yColIdx]);
                         const count = parseInt(cols[vColIdx]);
-                        
-                        if (isNaN(x_idx) || isNaN(y_idx) || isNaN(count)) continue;
-                        
+
+                        if (isNaN(x_idx) || isNaN(y_idx) || isNaN(count)) return;
+
                         if (count > maxCount) maxCount = count;
-                        
+                        if (x_idx > maxIdx) maxIdx = x_idx;
+                        if (y_idx > maxIdx) maxIdx = y_idx;
+
                         matrixData.push({
                             x: classLabels[x_idx] || `Class ${x_idx}`,
                             y: classLabels[y_idx] || `Class ${y_idx}`,
                             v: count
                         });
                     }
-                }
+                });
+
+                const numClasses = Math.max(classLabels.length, maxIdx + 1) || 1;
 
                 chartInstances[id] = new Chart(ctx, {
                     type: 'matrix',
@@ -576,30 +698,41 @@
                             data: matrixData,
                             backgroundColor(context) {
                                 const value = context.dataset.data[context.dataIndex].v;
-                                const alpha = maxCount > 0 ? value / maxCount : 0;
+                                const alpha = maxCount > 0 ? (0.15 + 0.85 * value / maxCount) : 0;
                                 return `rgba(59, 130, 246, ${alpha})`;
                             },
-                            borderColor: '#111',
-                            borderWidth: 1,
-                            width: ({chart}) => {
+                            borderColor: '#333',
+                            borderWidth: 2,
+                            width: ({ chart }) => {
                                 const area = chart.chartArea;
                                 if (!area) return 0;
-                                const numClasses = classLabels.length || 1;
-                                return area.width / numClasses - 1;
+                                return (area.width / numClasses) - 4;
                             },
-                            height: ({chart}) => {
+                            height: ({ chart }) => {
                                 const area = chart.chartArea;
                                 if (!area) return 0;
-                                const numClasses = classLabels.length || 1;
-                                return area.height / numClasses - 1;
+                                return (area.height / numClasses) - 4;
                             }
                         }]
                     },
                     options: {
                         responsive: true, maintainAspectRatio: false, color: '#eee',
                         scales: {
-                            x: { title: { display: true, text: 'Predicted Class', color: '#eee' }, ticks: { color: '#aaa' }, grid: { display: false } },
-                            y: { title: { display: true, text: 'True Class', color: '#eee' }, ticks: { color: '#aaa' }, grid: { display: false } }
+                            x: {
+                                type: 'category',
+                                title: { display: true, text: 'Predicted Class', color: '#eee' },
+                                ticks: { color: '#aaa' },
+                                grid: { display: false },
+                                offset: true
+                            },
+                            y: {
+                                type: 'category',
+                                title: { display: true, text: 'True Class', color: '#eee' },
+                                ticks: { color: '#aaa' },
+                                grid: { display: false },
+                                offset: true,
+                                reverse: true
+                            }
                         },
                         plugins: {
                             tooltip: {
@@ -612,11 +745,30 @@
                                 }
                             }
                         }
-                    }
+                    },
+                    plugins: [{
+                        id: 'matrixText',
+                        afterDatasetsDraw(chart) {
+                            const ctx = chart.ctx;
+                            chart.data.datasets.forEach((dataset, i) => {
+                                const meta = chart.getDatasetMeta(i);
+                                meta.data.forEach((element, index) => {
+                                    const value = dataset.data[index].v;
+                                    const cellW = element.width || 0;
+                                    const cellH = element.height || 0;
+                                    ctx.fillStyle = '#fff';
+                                    ctx.font = 'bold 14px monospace';
+                                    ctx.textAlign = 'center';
+                                    ctx.textBaseline = 'middle';
+                                    ctx.fillText(value, element.x + cellW / 2, element.y + cellH / 2);
+                                });
+                            });
+                        }
+                    }]
                 });
             }
         }
-        document.getElementById('layout-select').addEventListener('change', function(e) {
+        document.getElementById('layout-select').addEventListener('change', function (e) {
             const val = e.target.value;
             const container = document.getElementById('dynamic-charts-container');
             if (val === 'auto') {
@@ -624,11 +776,12 @@
             } else {
                 container.style.gridTemplateColumns = `repeat(${val}, 1fr)`;
             }
-            
+
             setTimeout(() => {
                 Object.values(chartInstances).forEach(chart => chart.resize());
             }, 100);
         });
     </script>
 </body>
+
 </html>

@@ -1,14 +1,14 @@
 import os
+import re
 import csv
 import json
 import subprocess
 import sys
-import shutil
+
 import getpass
 from datetime import datetime
 from typing import TypedDict, NotRequired
-from huggingface_hub import HfApi
-
+import threading
 
 class ChartConfig(TypedDict):
     title: str
@@ -62,22 +62,34 @@ class ExperimentTracker:
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.git_commit = get_git_commit()
 
-        # Count existing runs to determine run number
+        # Determine run number from the highest existing run* directory
         os.makedirs(self.root_dir, exist_ok=True)
-        existing_runs = [
-            d
-            for d in os.listdir(self.root_dir)
-            if os.path.isdir(os.path.join(self.root_dir, d))
-        ]
-        self.run_number = len(existing_runs) + 1
+        max_run = 0
+        for d in os.listdir(self.root_dir):
+            match = re.match(r"^run(\d+)_", d)
+            if match and os.path.isdir(os.path.join(self.root_dir, d)):
+                max_run = max(max_run, int(match.group(1)))
 
-        # Create specific run directory
-        dir_name = f"run{self.run_number:03d}_{self.run_name}_{self.timestamp}_{self.git_commit}"
-        self.run_dir = os.path.join(self.root_dir, dir_name)
-        os.makedirs(self.run_dir, exist_ok=True)
+        # Create run directory with atomic mkdir to handle parallel launches
+        for _ in range(100):
+            self.run_number = max_run + 1
+            dir_name = f"run{self.run_number:03d}_{self.run_name}_{self.timestamp}_{self.git_commit}"
+            self.run_dir = os.path.join(self.root_dir, dir_name)
+            try:
+                os.mkdir(self.run_dir)
+                break
+            except FileExistsError:
+                max_run = self.run_number
+                continue
+        else:
+            raise RuntimeError(
+                f"Failed to create a unique run directory after 100 retries in {self.root_dir}"
+            )
 
         # Setup CSV log headers tracking
         self.metrics_headers = {}  # Map from filename to list of headers
+        self._auto_registered_metrics = set()
+        self._lock = threading.RLock()
 
         # Setup metadata dump (useful for loading configs later)
         self.meta: ExperimentMeta = {
@@ -96,8 +108,9 @@ class ExperimentTracker:
         print(f"Tracking experiment at: {self.run_dir}")
 
     def _save_meta(self):
-        with open(os.path.join(self.run_dir, "meta.json"), "w") as f:
-            json.dump(self.meta, f, indent=4)
+        with self._lock:
+            with open(os.path.join(self.run_dir, "meta.json"), "w") as f:
+                json.dump(self.meta, f, indent=4)
 
     def register_chart(
         self,
@@ -108,25 +121,26 @@ class ExperimentTracker:
         layout: dict[str, object] | None = None,
     ):
         """Registers a custom chart so the UI engine automatically renders it."""
-        chart_config: ChartConfig = {
-            "title": title,
-            "filename": filename,
-            "type": chart_type,
-        }
-        if series is not None:
-            chart_config["series"] = series
-        if layout is not None:
-            chart_config["layout"] = layout
+        with self._lock:
+            chart_config: ChartConfig = {
+                "title": title,
+                "filename": filename,
+                "type": chart_type,
+            }
+            if series is not None:
+                chart_config["series"] = series
+            if layout is not None:
+                chart_config["layout"] = layout
 
-        # Avoid duplicating entries
-        for existing in self.meta["charts"]:
-            if existing["title"] == title:
-                existing.update(chart_config)
-                self._save_meta()
-                return
+            # Avoid duplicating entries
+            for existing in self.meta["charts"]:
+                if existing["title"] == title:
+                    existing.update(chart_config)
+                    self._save_meta()
+                    return
 
-        self.meta["charts"].append(chart_config)
-        self._save_meta()
+            self.meta["charts"].append(chart_config)
+            self._save_meta()
 
     def log(
         self,
@@ -145,8 +159,6 @@ class ExperimentTracker:
 
         self.log_metrics(filename, **data)
 
-        if not hasattr(self, "_auto_registered_metrics"):
-            self._auto_registered_metrics = set()
 
         for key in metrics.keys():
             if key not in self._auto_registered_metrics and key != step_label:
@@ -160,33 +172,126 @@ class ExperimentTracker:
 
     def log_metrics(self, filename: str = "metrics.csv", **kwargs):
         """Logs metrics to a CSV file. Dynamically handles headers."""
-        data = {}
-        data.update(kwargs)
+        with self._lock:
+            data = dict(kwargs)
 
-        metrics_file = os.path.join(self.run_dir, filename)
-        file_exists = os.path.isfile(metrics_file)
+            metrics_file = os.path.join(self.run_dir, filename)
+            file_exists = os.path.isfile(metrics_file)
 
-        if filename not in self.metrics_headers:
-            if file_exists:
-                with open(metrics_file, "r") as f:
-                    reader = csv.reader(f)
-                    try:
-                        self.metrics_headers[filename] = next(reader)
-                    except StopIteration:
-                        self.metrics_headers[filename] = list(data.keys())
+            if filename not in self.metrics_headers:
+                if file_exists:
+                    with open(metrics_file, "r") as f:
+                        reader = csv.reader(f)
+                        try:
+                            self.metrics_headers[filename] = next(reader)
+                        except StopIteration:
+                            self.metrics_headers[filename] = list(data.keys())
+                else:
+                    self.metrics_headers[filename] = list(data.keys())
+
+            # Check for columns not yet in the header
+            new_keys = [
+                k for k in data.keys() if k not in self.metrics_headers[filename]
+            ]
+
+            if new_keys and file_exists:
+                # New columns appeared mid-run — rewrite the file with the expanded header
+                self.metrics_headers[filename].extend(new_keys)
+                with open(metrics_file, "r", newline="") as f:
+                    reader = csv.DictReader(f)
+                    existing_rows = list(reader)
+                with open(metrics_file, "w", newline="") as f:
+                    writer = csv.DictWriter(
+                        f, fieldnames=self.metrics_headers[filename]
+                    )
+                    writer.writeheader()
+                    writer.writerows(existing_rows)
+                    writer.writerow(data)
             else:
-                self.metrics_headers[filename] = list(data.keys())
+                # No schema change — just append
+                self.metrics_headers[filename].extend(new_keys)
+                with open(metrics_file, "a", newline="") as f:
+                    writer = csv.DictWriter(
+                        f, fieldnames=self.metrics_headers[filename]
+                    )
+                    if f.tell() == 0:
+                        writer.writeheader()
+                    writer.writerow(data)
 
-        # Handle dynamic new keys gracefully
-        for k in data.keys():
-            if k not in self.metrics_headers[filename]:
-                self.metrics_headers[filename].append(k)
+    def save_trajectory(self, true_data, pred_data, filename="trajectory.csv"):
+        """
+        Saves a 2D trajectory of ground truth vs predicted data to a CSV.
+        true_data: numpy array of shape (seq_len, 2+)
+        pred_data: numpy array of shape (seq_len, 2+)
+        """
+        with self._lock:
+            csv_path = os.path.join(self.run_dir, filename)
 
-        with open(metrics_file, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=self.metrics_headers[filename])
-            if f.tell() == 0:
-                writer.writeheader()
-            writer.writerow(data)
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(
+                    ["step", "true_dim0", "true_dim1", "pred_dim0", "pred_dim1"]
+                )
+
+                max_len = max(len(true_data), len(pred_data))
+                for i in range(max_len):
+                    t0 = true_data[i][0] if i < len(true_data) else ""
+                    t1 = true_data[i][1] if i < len(true_data) else ""
+                    p0 = pred_data[i][0] if i < len(pred_data) else ""
+                    p1 = pred_data[i][1] if i < len(pred_data) else ""
+
+                    writer.writerow([i, t0, t1, p0, p1])
+
+            self.register_chart(
+                title="2D Trajectory",
+                filename=filename,
+                chart_type="scatter",
+                series=[
+                    {"name": "True Path", "x": "true_dim0", "y": "true_dim1"},
+                    {"name": "Prediction", "x": "pred_dim0", "y": "pred_dim1"},
+                ],
+                layout={"equal_aspect": True, "show_lines": True},
+            )
+            print(f"Saved trajectory data: {csv_path}")
+
+    def save_confusion_matrix(
+        self,
+        matrix_data,
+        classes=None,
+        title="Confusion Matrix",
+        filename="confusion.csv",
+    ):
+        """
+        Saves a confusion matrix to CSV and registers it for the UI.
+        matrix_data: 2D numpy array or nested list [true_class][pred_class]
+        classes: List of string labels for the classes.
+        """
+        with self._lock:
+            csv_path = os.path.join(self.run_dir, filename)
+            num_classes = len(matrix_data)
+            if classes is None:
+                classes = [f"Class {i}" for i in range(num_classes)]
+
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(
+                    ["true_class", "pred_class", "count", "true_label", "pred_label"]
+                )
+
+                for i in range(num_classes):
+                    for j in range(num_classes):
+                        writer.writerow(
+                            [i, j, matrix_data[i][j], classes[i], classes[j]]
+                        )
+
+            self.register_chart(
+                title=title,
+                filename=filename,
+                chart_type="heatmap",
+                series=[{"x": "pred_class", "y": "true_class", "value": "count"}],
+                layout={"classes": classes},
+            )
+            print(f"Saved confusion matrix: {csv_path}")
 
     def sync_to_hf(self, repo_id: str, cleanup: bool = False):
         """
@@ -202,6 +307,8 @@ class ExperimentTracker:
             )
             self.hf_token = token  # Save it in memory for subsequent pushes
 
+        from huggingface_hub import HfApi
+
         api = HfApi(token=token)
         run_folder_name = os.path.basename(self.run_dir)
 
@@ -215,76 +322,6 @@ class ExperimentTracker:
         print("✅ Upload complete!")
 
         if cleanup:
+            import shutil
             print(f"🧹 Cleaning up local folder: {self.run_dir}")
             shutil.rmtree(self.run_dir)
-
-    def save_trajectory(self, true_data, pred_data, filename="trajectory.csv"):
-        """
-        Saves a 2D trajectory of ground truth vs predicted data to a CSV.
-        true_data: numpy array of shape (seq_len, 2+)
-        pred_data: numpy array of shape (seq_len, 2+)
-        """
-        csv_path = os.path.join(self.run_dir, filename)
-
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                ["step", "true_dim0", "true_dim1", "pred_dim0", "pred_dim1"]
-            )
-
-            max_len = max(len(true_data), len(pred_data))
-            for i in range(max_len):
-                t0 = true_data[i, 0] if i < len(true_data) else ""
-                t1 = true_data[i, 1] if i < len(true_data) else ""
-                p0 = pred_data[i, 0] if i < len(pred_data) else ""
-                p1 = pred_data[i, 1] if i < len(pred_data) else ""
-
-                writer.writerow([i, t0, t1, p0, p1])
-
-        self.register_chart(
-            title="2D Trajectory",
-            filename=filename,
-            chart_type="scatter",
-            series=[
-                {"name": "True Path", "x": "true_dim0", "y": "true_dim1"},
-                {"name": "Prediction", "x": "pred_dim0", "y": "pred_dim1"},
-            ],
-            layout={"equal_aspect": True, "show_lines": True},
-        )
-        print(f"Saved trajectory data: {csv_path}")
-
-    def save_confusion_matrix(
-        self,
-        matrix_data,
-        classes=None,
-        title="Confusion Matrix",
-        filename="confusion.csv",
-    ):
-        """
-        Saves a confusion matrix to CSV and registers it for the UI.
-        matrix_data: 2D numpy array or nested list [true_class][pred_class]
-        classes: List of string labels for the classes.
-        """
-        csv_path = os.path.join(self.run_dir, filename)
-        num_classes = len(matrix_data)
-        if classes is None:
-            classes = [f"Class {i}" for i in range(num_classes)]
-
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                ["true_class", "pred_class", "count", "true_label", "pred_label"]
-            )
-
-            for i in range(num_classes):
-                for j in range(num_classes):
-                    writer.writerow([i, j, matrix_data[i][j], classes[i], classes[j]])
-
-        self.register_chart(
-            title=title,
-            filename=filename,
-            chart_type="heatmap",
-            series=[{"x": "pred_class", "y": "true_class", "value": "count"}],
-            layout={"classes": classes},
-        )
-        print(f"Saved confusion matrix: {csv_path}")

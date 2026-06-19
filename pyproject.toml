@@ -21,12 +21,3 @@ where = ["src"]
 [tool.setuptools.package-data]
 "trac_r" = ["static/*.html"]
 
-[tool.ty.environment]
-python = ".venv"
-python-version = "3.12"
-
-[dependency-groups]
-dev = [
-    "ruff>=0.15.15",
-    "ty>=0.0.41",
-]
